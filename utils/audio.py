@@ -37,6 +37,7 @@ class AudioProcessor(object):
         self.preemphasis = preemphasis
         self.griffin_lim_iters = griffin_lim_iters
         self.n_fft, self.hop_length, self.win_length = self._stft_parameters()
+        print(f" | > bits: {self.bits}")
         if preemphasis == 0:
             print(" | > Preemphasis is deactive.")
 

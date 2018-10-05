@@ -25,7 +25,7 @@ class MyDataset(Dataset):
 
     def __getitem__(self, index):
         file = self.metadata[index]
-        m = np.load(f"{self.path}mel/{file}.npy")
+        m = np.load(f"{self.path}mel/{file}.npy").transpose(1, 0)
         x = np.load(f"{self.path}quant/{file}.npy")
         return m, x
 
@@ -68,7 +68,7 @@ def train(model, optimizer, criterion, epochs, batch_size, classes, seq_len, ste
     for p in optimizer.param_groups:
         p["lr"] = lr
 
-    scheduler = AnnealLR(optimizer, warmup_steps=CONFIG.warmup_steps)
+    scheduler = AnnealLR(optimizer, warmup_steps=CONFIG.warmup_steps, last_epoch=step)
     for e in range(epochs):
         running_loss = 0.
         # TODO: write validation iteration
@@ -112,7 +112,7 @@ def train(model, optimizer, criterion, epochs, batch_size, classes, seq_len, ste
 def generate(step, samples=1, mulaw=False):
     global output
     k = step // 1000
-    test_mels = [np.load(f"{DATA_PATH}mel/{id}.npy") for id in test_ids[:samples]]
+    test_mels = [np.load(f"{DATA_PATH}mel/{id}.npy").transpose(1, 0) for id in test_ids[:samples]]
     ground_truth = [np.load(f"{DATA_PATH}quant/{id}.npy") for id in test_ids[:samples]]
     for i, (gt, mel) in enumerate(zip(ground_truth, test_mels)):
         print("\nGenerating: %i/%i" % (i + 1, samples))
@@ -187,17 +187,18 @@ if __name__ == "__main__":
         res_blocks=10,
     ).cuda()
     model = nn.DataParallel(model)
+    optimizer = optim.Adam(model.parameters())
 
     step=0
     # restore any checkpoint
     if args.restore_path:    
-        checkpoint = torch.load(MODEL_PATH)
+        checkpoint = torch.load(args.restore_path)
         model.load_state_dict(checkpoint["model"])
+        optimizer.load_state_dict(checkpoint['optimizer'])
         step = checkpoint['step']
 
     # define train functions
     criterion = nn.NLLLoss().cuda()
-    optimizer = optim.Adam(model.parameters())
     model.train()
 
     # HIT IT!!!
