@@ -11,16 +11,15 @@ _mel_basis = None
 class AudioProcessor(object):
     def __init__(
         self,
-        bits,
-        sample_rate,
-        num_mels,
-        min_level_db,
-        frame_shift_ms,
-        frame_length_ms,
-        ref_level_db,
-        num_freq,
-        power,
-        preemphasis,
+        bits=None,
+        sample_rate=None,
+        num_mels=None,
+        min_level_db=None,
+        frame_shift_ms=None,
+        frame_length_ms=None,
+        ref_level_db=None,
+        num_freq=None,
+        preemphasis=None,
         griffin_lim_iters=None,
     ):
 
@@ -33,7 +32,6 @@ class AudioProcessor(object):
         self.frame_length_ms = frame_length_ms
         self.ref_level_db = ref_level_db
         self.num_freq = num_freq
-        self.power = power
         self.preemphasis = preemphasis
         self.griffin_lim_iters = griffin_lim_iters
         self.n_fft, self.hop_length, self.win_length = self._stft_parameters()
@@ -43,7 +41,8 @@ class AudioProcessor(object):
 
     def save_wav(self, wav, path):
         wav_norm = wav * (32767 / max(0.01, np.max(np.abs(wav))))
-        librosa.output.write_wav(path, wav_norm.astype(np.int16), self.sample_rate)
+        # librosa.output.write_wav(path, wav_norm.astype(np.int16), self.sample_rate)
+        scipy.io.wavfile.write(path, self.sample_rate, wav_norm.astype(np.int16))
 
     def _linear_to_mel(self, spectrogram):
         global _mel_basis
@@ -144,7 +143,7 @@ class AudioProcessor(object):
                 return x + hop_length
         return len(wav)
 
-    # WaveRNN repo specific functions 
+    # WaveRNN repo specific functions
     # def mulaw_encode(self, wav, qc):
     #     mu = qc - 1
     #     wav_abs = np.minimum(np.abs(wav), 1.0)
@@ -166,9 +165,6 @@ class AudioProcessor(object):
 
     def load_wav(self, filename, encode=False):
         x = librosa.load(filename, sr=self.sample_rate)[0]
-        if encode == True:
-            x = encode_16bits(x)
-        return x
 
     def encode_16bits(self, x):
         return np.clip(x * 2 ** 15, -2 ** 15, 2 ** 15 - 1).astype(np.int16)

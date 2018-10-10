@@ -9,7 +9,7 @@ from torch import nn
 from torch import optim
 from torch.utils.data import Dataset, DataLoader
 from utils.display import *
-from utils.audio import AudioProcessor
+from TTS.utils.audio import AudioProcessor
 from utils.generic_utils import load_config, save_checkpoint, AnnealLR
 from tqdm import tqdm
 from models.wavernn import Model
@@ -25,7 +25,7 @@ class MyDataset(Dataset):
 
     def __getitem__(self, index):
         file = self.metadata[index]
-        m = np.load(f"{self.path}mel/{file}.npy").transpose(1, 0)
+        m = np.load(f"{self.path}mel/{file}.npy")
         x = np.load(f"{self.path}quant/{file}.npy")
         return m, x
 
@@ -66,7 +66,7 @@ def train(model, optimizer, criterion, epochs, batch_size, classes, seq_len, ste
     )
 
     for p in optimizer.param_groups:
-        p["lr"] = lr
+        p["initial_lr"] = lr
 
     scheduler = AnnealLR(optimizer, warmup_steps=CONFIG.warmup_steps, last_epoch=step)
     for e in range(epochs):
@@ -112,7 +112,7 @@ def train(model, optimizer, criterion, epochs, batch_size, classes, seq_len, ste
 def generate(step, samples=1, mulaw=False):
     global output
     k = step // 1000
-    test_mels = [np.load(f"{DATA_PATH}mel/{id}.npy").transpose(1, 0) for id in test_ids[:samples]]
+    test_mels = [np.load(f"{DATA_PATH}mel/{id}.npy") for id in test_ids[:samples]]
     ground_truth = [np.load(f"{DATA_PATH}quant/{id}.npy") for id in test_ids[:samples]]
     for i, (gt, mel) in enumerate(zip(ground_truth, test_mels)):
         print("\nGenerating: %i/%i" % (i + 1, samples))
@@ -148,7 +148,6 @@ if __name__ == "__main__":
         CONFIG.frame_length_ms,
         CONFIG.ref_level_db,
         CONFIG.num_freq,
-        CONFIG.power,
         CONFIG.preemphasis,
     )
 
