@@ -15,7 +15,9 @@ from tqdm import tqdm
 from models.wavernn import Model
 
 
-torch.backends.cudnn.benchmark = True
+use_cuda = torch.cuda.is_available()
+if use_cuda:
+    torch.backends.cudnn.benchmark = True
 
 # define data classes
 class MyDataset(Dataset):
@@ -80,7 +82,8 @@ def train(model, optimizer, criterion, epochs, batch_size, classes, seq_len, ste
         print(" > Training")
         model.train()
         for i, (x, m, y) in enumerate(train_loader):
-            x, m, y = x.cuda(), m.cuda(), y.cuda()
+            if use_cuda:
+                x, m, y = x.cuda(), m.cuda(), y.cuda()
             y_hat = model(x, m)
             y_hat = y_hat.transpose(1, 2).unsqueeze(-1)
             y = y.unsqueeze(-1)
@@ -136,24 +139,20 @@ if __name__ == "__main__":
     parser.add_argument(
         "--restore_path", type=str, default=0, help="path for a model to fine-tune."
     )
+    parser.add_argument(
+        "--data_path", type=str, default='', help="data path to overwrite config.json."
+    )
     args = parser.parse_args()
     CONFIG = load_config(args.config_path)
 
-    ap = AudioProcessor(
-        CONFIG.bits,
-        CONFIG.sample_rate,
-        CONFIG.num_mels,
-        CONFIG.min_level_db,
-        CONFIG.frame_shift_ms,
-        CONFIG.frame_length_ms,
-        CONFIG.ref_level_db,
-        CONFIG.num_freq,
-        CONFIG.preemphasis,
-    )
+    ap = AudioProcessor(**CONFIG.audio)
 
-    bits = CONFIG.bits
+    bits = CONFIG.audio['bits']
     seq_len = ap.hop_length * 5
     run_name = CONFIG.run_name
+
+    if args.data_path != '':
+        CONFIG.data_path = args.data_path
 
     # set paths
     OUT_PATH = os.path.join(CONFIG.out_path, CONFIG.run_name)
@@ -174,18 +173,9 @@ if __name__ == "__main__":
     dataset_ids = dataset_ids[:-50]
 
     # create the model
-    model = Model(
-        rnn_dims=512,
-        fc_dims=512,
-        bits=bits,
-        pad=2,
-        upsample_factors=(5, 5, 11),
-        feat_dims=80,
-        compute_dims=128,
-        res_out_dims=128,
-        res_blocks=10,
-    ).cuda()
-    model = nn.DataParallel(model)
+    model = Model(bits=CONFIG.audio['bits'], **CONFIG.model)
+    if use_cuda:
+        model = nn.DataParallel(model).cuda()
     optimizer = optim.Adam(model.parameters())
 
     step=0

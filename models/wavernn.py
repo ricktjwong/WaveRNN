@@ -27,9 +27,9 @@ class ResBlock(nn.Module):
 
 class MelResNet(nn.Module):
     """
-    Basic ResNet that prejects melspectrogram to a internal network representation
+    Basic ResNet that projects melspectrogram to a internal network representation
     """
-    def __init__(self, res_blocks, in_dims, compute_dims, res_out_dims):
+    def __init__(self, res_blocks, in_dims, compute_dims, res_out_dims, resize_scale):
         super().__init__()
         self.conv_in = nn.Conv1d(in_dims, compute_dims, kernel_size=5, bias=False)
         self.batch_norm = nn.BatchNorm1d(compute_dims)
@@ -37,6 +37,7 @@ class MelResNet(nn.Module):
         for i in range(res_blocks):
             self.layers.append(ResBlock(compute_dims))
         self.conv_out = nn.Conv1d(compute_dims, res_out_dims, kernel_size=1)
+        self.repeat = Repeat2d(resize_scale, 1)
 
     def forward(self, x):
         x = self.conv_in(x)
@@ -45,10 +46,14 @@ class MelResNet(nn.Module):
         for f in self.layers:
             x = f(x)
         x = self.conv_out(x)
-        return x
+
+        x = x.unsqueeze(1)
+        x = self.repeat(x)
+        x = x.squeeze(1)
+        return x.transpose(1, 2)
 
 
-class Stretch2d(nn.Module):
+class Repeat2d(nn.Module):
     """
     Filling the missing time steps by copying values
     """
@@ -70,18 +75,17 @@ class UpsampleNetwork(nn.Module):
     conv layers to fine-tune the upsampled representation.
     """
     def __init__(
-        self, feat_dims, upsample_scales, compute_dims, res_blocks, res_out_dims, pad
+        self, feat_dims, upsample_scales, compute_dims, pad
     ):
         super().__init__()
         total_scale = np.cumproduct(upsample_scales)[-1]
         self.indent = pad * total_scale
-        self.resnet = MelResNet(res_blocks, feat_dims, compute_dims, res_out_dims)
-        self.resnet_stretch = Stretch2d(total_scale, 1)
+        # self.resnet = MelResNet(res_blocks, feat_dims, compute_dims, res_out_dims)
         self.up_layers = nn.ModuleList()
         for scale in upsample_scales:
             k_size = (1, scale * 2 + 1)
             padding = (0, scale)
-            stretch = Stretch2d(scale, 1)
+            stretch = Repeat2d(scale, 1)
             conv = nn.Conv2d(1, 1, kernel_size=k_size, padding=padding, bias=False)
             conv.weight.data.fill_(1. / k_size[1])
             self.up_layers.append(stretch)
@@ -89,15 +93,12 @@ class UpsampleNetwork(nn.Module):
 
     def forward(self, m):
         # compute aux mel representation
-        aux = self.resnet(m).unsqueeze(1)
-        aux = self.resnet_stretch(aux)
-        aux = aux.squeeze(1)
         m = m.unsqueeze(1)
         # upsample mel spec.
         for f in self.up_layers:
             m = f(m)
         m = m.squeeze(1)[:, :, self.indent : -self.indent]
-        return m.transpose(1, 2), aux.transpose(1, 2)
+        return m.transpose(1, 2)
 
 
 class Model(nn.Module):
@@ -110,21 +111,35 @@ class Model(nn.Module):
         upsample_factors,
         feat_dims,
         compute_dims,
-        res_out_dims,
-        res_blocks,
+        res_out_dims=None,
+        res_blocks=None,
+        **kwargs
     ):
         super().__init__()
         self.n_classes = 2 ** bits
         self.rnn_dims = rnn_dims
         self.aux_dims = res_out_dims // 4
+        out_scale = np.cumproduct(upsample_factors)[-1]
+        if res_blocks is not None:
+            self.resnet = MelResNet(res_blocks, feat_dims, compute_dims, res_out_dims, out_scale)
+        else:
+            self.resnet = None
         self.upsample = UpsampleNetwork(
-            feat_dims, upsample_factors, compute_dims, res_blocks, res_out_dims, pad
+            feat_dims, upsample_factors, compute_dims, pad
         )
-        self.I = nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims)
         self.rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
-        self.rnn2 = nn.GRU(rnn_dims + self.aux_dims, rnn_dims, batch_first=True)
-        self.fc1 = nn.Linear(rnn_dims + self.aux_dims, fc_dims)
-        self.fc2 = nn.Linear(fc_dims + self.aux_dims, fc_dims)
+        if self.resnet:
+            print(" | > Resnet is active.")
+            self.I = nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims)
+            self.rnn2 = nn.GRU(rnn_dims + self.aux_dims, rnn_dims, batch_first=True)
+            self.fc1 = nn.Linear(rnn_dims + self.aux_dims, fc_dims)
+            self.fc2 = nn.Linear(fc_dims + self.aux_dims, fc_dims)
+        else:
+            print(" | > Resnet is deactive.")
+            self.I = nn.Linear(feat_dims + 1, rnn_dims)
+            self.rnn2 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
+            self.fc1 = nn.Linear(rnn_dims, fc_dims)
+            self.fc2 = nn.Linear(fc_dims, fc_dims)
         self.fc3 = nn.Linear(fc_dims, self.n_classes)
         num_params(self)
 
@@ -132,21 +147,26 @@ class Model(nn.Module):
         bsize = mels.size(0)
 
         # hidden rnn states
-        h1 = torch.zeros(1, bsize, self.rnn_dims).cuda()
-        h2 = torch.zeros(1, bsize, self.rnn_dims).cuda()
+        h1 = x.data.new(1, bsize, self.rnn_dims).zero_()
+        h2 = x.data.new(1, bsize, self.rnn_dims).zero_()
 
         # compute input representations from mel-spec.
-        mels, aux = self.upsample(mels)
-
-        # split aux features into different temporal segments.
-        aux_idx = [self.aux_dims * i for i in range(5)]
-        a1 = aux[:, :, aux_idx[0] : aux_idx[1]]
-        a2 = aux[:, :, aux_idx[1] : aux_idx[2]]
-        a3 = aux[:, :, aux_idx[2] : aux_idx[3]]
-        a4 = aux[:, :, aux_idx[3] : aux_idx[4]]
+        if self.resnet:
+            aux = self.resnet(mels)
+            # split aux features into different temporal segments.
+            aux_idx = [self.aux_dims * i for i in range(5)]
+            a1 = aux[:, :, aux_idx[0] : aux_idx[1]]
+            a2 = aux[:, :, aux_idx[1] : aux_idx[2]]
+            a3 = aux[:, :, aux_idx[2] : aux_idx[3]]
+            a4 = aux[:, :, aux_idx[3] : aux_idx[4]]
+            
+        mels = self.upsample(mels)
 
         # concat[mel, aux1] -> FC -> GRU 
-        x = torch.cat([x.unsqueeze(-1), mels, a1], dim=2)
+        if self.resnet:
+            x = torch.cat([x.unsqueeze(-1), mels, a1], dim=2)
+        else:
+            x = torch.cat([x.unsqueeze(-1), mels], dim=2)
         x = self.I(x)
         res = x
         x, _ = self.rnn1(x, h1)
@@ -154,16 +174,19 @@ class Model(nn.Module):
         # concat[x, aux2] -> GRU 
         x = x + res
         res = x
-        x = torch.cat([x, a2], dim=2)
+        if self.resnet:
+            x = torch.cat([x, a2], dim=2)
         x, _ = self.rnn2(x, h2)
 
         # concat[x, aux3] -> FC
         x = x + res
-        x = torch.cat([x, a3], dim=2)
+        if self.resnet:
+            x = torch.cat([x, a3], dim=2)
         x = F.relu(self.fc1(x))
 
         # concat[x, aux4] -> FC
-        x = torch.cat([x, a4], dim=2)
+        if self.resnet:
+            x = torch.cat([x, a4], dim=2)
         x = F.relu(self.fc2(x))
 
         # x -> FC_OUT

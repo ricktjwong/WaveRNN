@@ -1,4 +1,4 @@
 #!/bin/bash
 source ../tmp/venv/bin/activate
-python extract_features.py --config_path config.json
+python extract_features.py --config_path config.json --data_path ${DATA_ROOT}/shared/data/keithito/LJSpeech-1.1/
 python train.py --config_path config.json
