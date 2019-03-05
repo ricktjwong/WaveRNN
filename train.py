@@ -111,13 +111,8 @@ def train(model, optimizer, criterion, epochs, batch_size, classes, step, lr, ar
             if step % CONFIG.checkpoint_step == 0 and args.rank == 0:
                 save_checkpoint(model, optimizer, avg_loss, MODEL_PATH, step, e)
                 print(" > checkpoint saved", flush=True)
-        # visual
-        # m_scaled, _ = model.upsample(m)
-        # plot_spec(m[0], VIS_PATH + "/mel_{}.png".format(step))
-        # plot_spec(
-        #     m_scaled[0].transpose(0, 1), VIS_PATH + "/mel_scaled_{}.png".format(step)
-        # )
         # validation loop
+        model.eval()
         evaluate(model, criterion, batch_size)
 
 

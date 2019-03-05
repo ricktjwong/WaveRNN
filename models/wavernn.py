@@ -4,6 +4,7 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 import time
+from utils.audio import AudioProcessor
 
 
 def stream(string, variables) :
@@ -212,10 +213,7 @@ class Model(nn.Module) :
         else :
             output = output[0]
             
-        # librosa.output.write_wav(save_path, output.astype(np.float32), self.sample_rate)
-        
-        self.train()
-        
+        output = AudioProcessor.mulaw_decode(output, self.n_classes)
         return output
     
     def gen_display(self, i, seq_len, b_size, start) :

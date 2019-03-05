@@ -4,7 +4,7 @@ from torch.utils.data import Dataset
 
 
 class MyDataset(Dataset):
-    def __init__(self, ids, path, mel_len, hop_length, bits, pad, eval=False):
+    def __init__(self, ids, path, mel_len, hop_length, bits, pad, ap, eval=False):
         self.path = path
         self.metadata = ids
         self.eval = eval
@@ -12,11 +12,15 @@ class MyDataset(Dataset):
         self.pad = pad 
         self.hop_length = hop_length
         self.bits = bits
+        self.ap = ap
 
     def __getitem__(self, index):
         file = self.metadata[index]
         m = np.load(f"{self.path}mel/{file}.npy")
-        x = np.load(f"{self.path}quant/{file}.npy")
+        # [-1, 1]
+        x = ap.load_wav(f"{self.path}wavs/{file}.wav")
+        # [0, 2**bits]
+        x = ap.mulaw_encode(x, 2**self.bits)
         return m, x
 
     def __len__(self):
