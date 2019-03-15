@@ -85,12 +85,12 @@ def train(model, optimizer, criterion, epochs, batch_size, classes, step, lr, ar
         for i, (x, m, y) in enumerate(train_loader):
             if use_cuda:
                 x, m, y = x.cuda(), m.cuda(), y.cuda()
+            optimizer.zero_grad()
             y_hat = model(x, m)
             y_hat = y_hat.transpose(1, 2).unsqueeze(-1)
             y = y.unsqueeze(-1)
             m_scaled, _ = model.upsample(m)
             loss = criterion(y_hat, y)
-            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             speed = (i + 1) / (time.time() - start)
