@@ -1,14 +1,13 @@
 {
-    "model_name": "wavernn_4241_finetune_10bit",
-    "model_description": "10bit finetune model from 9 bit model",
+    "model_name": "nancy_4378_10bit",
+    "model_description": "10bit finetune model from 10bit ljspeech model",
 
     "audio":{
         "audio_processor": "audio",     // to use dictate different audio processors, if available.
         "bits": 10,
-        // Audio processing parameters
         "num_mels": 80,         // size of the mel spec frame. 
         "num_freq": 1025,       // number of stft frequency levels. Size of the linear spectogram frame.
-        "sample_rate": 22050,   // wav sample-rate. If different than the original data, it is resampled.
+        "sample_rate": 16000,   // DATASET-RELATED: wav sample-rate. If different than the original data, it is resampled.
         "frame_length_ms": 50,  // stft window length in ms.
         "frame_shift_ms": 12.5, // stft window hop-lengh in ms.
         "preemphasis": 0.98,    // pre-emphasis to reduce spec noise and make it more structured. If 0.0, no -pre-emphasis.
@@ -40,7 +39,8 @@
     "num_workers": 8,
     "mel_len": 8,
     "pad": 2,
+    "upsample_factors": [5, 5, 8],  // multipilication of all  == hop_length
 
-    "data_path": "/home/erogol/Data/LJSpeech-1.1/wavernn_4241/",
+    "data_path": "/media/erogol/data_ssd/Data/Nancy/wavernn_4378/",
     "output_path": "/media/erogol/data_ssd/Data/models/wavernn/"
 }
