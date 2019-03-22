@@ -195,7 +195,7 @@ class Model(nn.Module) :
                 logits = self.fc3(x)
                 posterior = F.softmax(logits, dim=1)
                 distrib = torch.distributions.Categorical(posterior)
-                
+
                 sample = 2 * distrib.sample().float() / (self.n_classes - 1.) - 1.
                 output.append(sample)
                 x = sample.unsqueeze(-1)

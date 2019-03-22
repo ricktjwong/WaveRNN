@@ -189,12 +189,13 @@ def main(args):
     train_ids = train_ids[:-10]
 
     # create the model
+    assert np.prod(CONFIG.upsample_factors) == ap.hop_length
     model = Model(
         rnn_dims=512,
         fc_dims=512,
         bits=ap.bits,
         pad=CONFIG.pad,
-        upsample_factors=(5, 5, 11),
+        upsample_factors=CONFIG.upsample_factors,  # set this depending on dataset
         feat_dims=80,
         compute_dims=128,
         res_out_dims=128,

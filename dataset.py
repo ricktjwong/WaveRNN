@@ -50,7 +50,5 @@ class MyDataset(Dataset):
         coarse = torch.LongTensor(coarse)
 
         x_input = 2 * coarse[:, :seq_len].float() / (2 ** self.bits - 1.0) - 1.0
-
         y_coarse = coarse[:, 1:]
-
         return x_input, mels, y_coarse
