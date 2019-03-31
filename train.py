@@ -6,8 +6,6 @@ import shutil
 import traceback
 import sys
 
-sys.path.insert(0, "/home/erogol/projects/")
-
 import librosa
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,9 +15,10 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from distribute import *
+from utils.distribution import gaussian_loss, discretized_mix_logistic_loss
 from dataset import MyDataset
 from models.wavernn import Model
-from utils.audio import AudioProcessor
+from utils.audio import AudioProcessor  # it is important to keep it updated as in TTS
 from utils.display import *
 from utils.generic_utils import (
     AnnealLR,
