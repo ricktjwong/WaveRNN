@@ -21,7 +21,8 @@ from utils.audio import AudioProcessor
 from utils.display import *
 from utils.distribution import discretized_mix_logistic_loss, gaussian_loss
 from utils.generic_utils import (check_update, count_parameters, load_config,
-                                 remove_experiment_folder, save_checkpoint)
+                                 remove_experiment_folder, save_checkpoint,
+                                 save_best_model)
 
 
 torch.backends.cudnn.enabled = True
@@ -68,6 +69,7 @@ def train(model, optimizer, criterion, scheduler, epochs, batch_size, step, lr, 
         p["initial_lr"] = lr
         p["lr"] = lr
 
+    best_loss = float('inf')
     for e in range(epochs):
         running_loss = 0.0
         # TODO: write validation iteration
@@ -117,7 +119,9 @@ def train(model, optimizer, criterion, scheduler, epochs, batch_size, step, lr, 
         #     m_scaled[0].transpose(0, 1), VIS_PATH + "/mel_scaled_{}.png".format(step)
         # )
         # validation loop
-        evaluate(model, criterion, batch_size)
+        avg_val_loss = evaluate(model, criterion, batch_size)
+        best_loss = save_best_model(model, optimizer, avg_val_loss, best_loss, MODEL_PATH, step, e)
+
 
 
 def evaluate(model, criterion, batch_size):
@@ -153,6 +157,7 @@ def evaluate(model, criterion, batch_size):
                     )
                 )
         print(" | > Validation Loss: {}".format(avg_val_loss), flush=True)
+    return avg_val_loss
 
 
 def main(args):

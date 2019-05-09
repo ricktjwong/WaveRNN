@@ -23,7 +23,7 @@ class MyDataset(Dataset):
             x = self.ap.load_wav(f"{self.path}quant/{file}.npy")
         else:
             raise RuntimeError("Unknown dataset mode - ", self.mode)
-        return m, x
+        return m, x, file
 
     def __len__(self):
         return len(self.metadata)
@@ -34,7 +34,7 @@ class MyDataset(Dataset):
         mel_win = seq_len // self.hop_length + 2 * pad
         max_offsets = [x[0].shape[-1] - (mel_win + 2 * pad) for x in batch]
         if self.eval:
-            mel_offsets = [100] * len(batch)
+            mel_offsets = [10] * len(batch)
         else:
             mel_offsets = [np.random.randint(0, offset) for offset in max_offsets]
         sig_offsets = [(offset + pad) * self.hop_length for offset in mel_offsets]
