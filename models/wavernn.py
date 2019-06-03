@@ -4,8 +4,11 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 import time
-from ..utils.distribution import sample_from_gaussian, sample_from_discretized_mix_logistic
-
+# fix this 
+try:
+    from utils.distribution import sample_from_gaussian, sample_from_discretized_mix_logistic
+except:
+    from ..utils.distribution import sample_from_gaussian, sample_from_discretized_mix_logistic
 
 def stream(string, variables) :
     sys.stdout.write(f'\r{string}' % variables)

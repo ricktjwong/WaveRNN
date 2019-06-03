@@ -72,8 +72,6 @@ def train(model, optimizer, criterion, scheduler, epochs, batch_size, step, lr, 
     best_loss = float('inf')
     for e in range(epochs):
         running_loss = 0.0
-        # TODO: write validation iteration
-        # val_loss = 0.
         start = time.time()
         running_loss = 0.0
         iters = len(train_loader)
