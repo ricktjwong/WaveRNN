@@ -4,8 +4,10 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 import time
+from scipy import signal
 # fix this 
 try:
+    from utils.audio import AudioProcessor as ap
     from utils.distribution import sample_from_gaussian, sample_from_discretized_mix_logistic
 except:
     from ..utils.distribution import sample_from_gaussian, sample_from_discretized_mix_logistic
@@ -94,13 +96,22 @@ class UpsampleNetwork(nn.Module) :
 
 
 class Model(nn.Module) :
-    def __init__(self, rnn_dims, fc_dims, mode, pad, upsample_factors,
+    def __init__(self, rnn_dims, fc_dims, mode, mulaw, pad, upsample_factors,
                  feat_dims, compute_dims, res_out_dims, res_blocks,
                  hop_length, sample_rate):
         super().__init__()
         self.mode = mode
+        self.mulaw = mulaw
         self.pad = pad
-        self.n_classes = 3 * 10
+        if type(self.mode) is int:
+            self.n_classes = 2 ** self.mode
+        elif self.mode == 'mold':
+            self.n_classes = 3 * 10
+        elif self.mode == 'gauss':
+            self.n_classes = 2
+        else:
+            raise RuntimeError(" > Unknown training mode")
+
         self.rnn_dims = rnn_dims
         self.aux_dims = res_out_dims // 4
         self.hop_length = hop_length
@@ -159,6 +170,7 @@ class Model(nn.Module) :
         with torch.no_grad() :
             
             # mels = torch.FloatTensor(mels).cuda().unsqueeze(0)
+            wave_len = (mels.size(-1) - 1) * self.hop_length
             mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, side='both')
             mels, aux = self.upsample(mels.transpose(1, 2))
             
@@ -198,12 +210,22 @@ class Model(nn.Module) :
                 x = F.relu(self.fc2(x))
                 
                 logits = self.fc3(x)
-                # TODO: implement other modes
+
                 if self.mode == 'mold':
                     sample = sample_from_discretized_mix_logistic(logits.unsqueeze(0).transpose(1, 2))
                     output.append(sample.view(-1))
-                    # x = torch.FloatTensor([[sample]]).cuda()
                     x = sample.transpose(0, 1).cuda()
+                elif self.mode == 'gauss':
+                    sample = sample_from_gaussian(logits.unsqueeze(0).transpose(1, 2))
+                    output.append(sample.view(-1))
+                    x = sample.transpose(0, 1).cuda()
+                elif type(self.mode) is int:
+                    posterior = F.softmax(logits, dim=1)
+                    distrib = torch.distributions.Categorical(posterior)
+
+                    sample = 2 * distrib.sample().float() / (self.n_classes - 1.) - 1.
+                    output.append(sample)
+                    x = sample.unsqueeze(-1)                    
                 else:
                     raise RuntimeError("Unknown model mode value - ", self.mode)
                 
@@ -217,6 +239,14 @@ class Model(nn.Module) :
             output = self.xfade_and_unfold(output, target, overlap)
         else :
             output = output[0]
+        
+        if self.mulaw and type(self.mode) == int:
+            output = ap.mulaw_decode(output, self.mode)
+
+        # Fade-out at the end to avoid signal cutting out suddenly
+        # fade_out = np.linspace(1, 0, 20 * self.hop_length)
+        # output = output[:wave_len]
+        # output[-20 * self.hop_length:] *= fade_out
             
         self.train()
         return output
@@ -249,114 +279,99 @@ class Model(nn.Module) :
         return padded
 
     
-    def fold_with_overlap(self, x, target, overlap) :
-        
+    def fold_with_overlap(self, x, target, overlap):
+
         ''' Fold the tensor with overlap for quick batched inference.
             Overlap will be used for crossfading in xfade_and_unfold()
-
         Args:
-            x (tensor)    : Upsampled conditioning features. 
+            x (tensor)    : Upsampled conditioning features.
                             shape=(1, timesteps, features)
             target (int)  : Target timesteps for each index of batch
             overlap (int) : Timesteps for both xfade and rnn warmup
-
         Return:
             (tensor) : shape=(num_folds, target + 2 * overlap, features)
-         
-        Details:      
-            x = [[h1, h2, ... hn]] 
-
+        Details:
+            x = [[h1, h2, ... hn]]
             Where each h is a vector of conditioning features
-
-            Eg: target=2, overlap=1 with x.size(1)=10 
-
+            Eg: target=2, overlap=1 with x.size(1)=10
             folded = [[h1, h2, h3, h4],
                       [h4, h5, h6, h7],
                       [h7, h8, h9, h10]]
         '''
 
         _, total_len, features = x.size()
-        
+
         # Calculate variables needed
         num_folds = (total_len - overlap) // (target + overlap)
         extended_len = num_folds * (overlap + target) + overlap
         remaining = total_len - extended_len
-        
+
         # Pad if some time steps poking out
-        if remaining != 0 :
+        if remaining != 0:
             num_folds += 1
-            padding = target + 2 * overlap - remaining    
+            padding = target + 2 * overlap - remaining
             x = self.pad_tensor(x, padding, side='after')
 
         folded = torch.zeros(num_folds, target + 2 * overlap, features).cuda()
-        
+
         # Get the values for the folded tensor
-        for i in range(num_folds) :
+        for i in range(num_folds):
             start = i * (target + overlap)
             end = start + target + 2 * overlap
             folded[i] = x[:, start:end, :]
 
         return folded
-    
-    
-    def xfade_and_unfold(self, y, target, overlap) :
-        
+
+    def xfade_and_unfold(self, y, target, overlap):
+
         ''' Applies a crossfade and unfolds into a 1d array.
-            
         Args:
             y (ndarry)    : Batched sequences of audio samples
                             shape=(num_folds, target + 2 * overlap)
                             dtype=np.float64
             overlap (int) : Timesteps for both xfade and rnn warmup
-
         Return:
-            (ndarry) : audio samples in a 1d array  
+            (ndarry) : audio samples in a 1d array
                        shape=(total_len)
                        dtype=np.float64
-        
-        Details: 
-            y = [[seq1], 
-                 [seq2], 
-                 [seq3]] 
-            
+        Details:
+            y = [[seq1],
+                 [seq2],
+                 [seq3]]
             Apply a gain envelope at both ends of the sequences
-        
             y = [[seq1_in, seq1_target, seq1_out],
                  [seq2_in, seq2_target, seq2_out],
                  [seq3_in, seq3_target, seq3_out]]
-
             Stagger and add up the groups of samples:
-
             [seq1_in, seq1_target, (seq1_out + seq2_in), seq2_target, ...]
-            
         '''
-        
+
         num_folds, length = y.shape
         target = length - 2 * overlap
         total_len = num_folds * (target + overlap) + overlap
-        
+
         # Need some silence for the rnn warmup
         silence_len = overlap // 2
         fade_len = overlap - silence_len
         silence = np.zeros((silence_len), dtype=np.float64)
-        
+
         # Equal power crossfade
         t = np.linspace(-1, 1, fade_len, dtype=np.float64)
         fade_in = np.sqrt(0.5 * (1 + t))
         fade_out = np.sqrt(0.5 * (1 - t))
-        
+
         # Concat the silence to the fades
         fade_in = np.concatenate([silence, fade_in])
         fade_out = np.concatenate([fade_out, silence])
-        
+
         # Apply the gain to the overlap samples
         y[:, :overlap] *= fade_in
         y[:, -overlap:] *= fade_out
-        
+
         unfolded = np.zeros((total_len), dtype=np.float64)
-        
+
         # Loop to add up all the samples
-        for i in range(num_folds ) :
+        for i in range(num_folds):
             start = i * (target + overlap)
             end = start + target + 2 * overlap
             unfolded[start:end] += y[i]

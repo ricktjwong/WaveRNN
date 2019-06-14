@@ -20,7 +20,7 @@ class MyDataset(Dataset):
         if self.mode in ['gauss', 'mold']:
             x = self.ap.load_wav(f"{self.path}wavs/{file}.wav")
         elif type(self.mode) is int:
-            x = self.ap.load_wav(f"{self.path}quant/{file}.npy")
+            x = np.load(f'{self.path}quant/{file}.npy')
         else:
             raise RuntimeError("Unknown dataset mode - ", self.mode)
         return m, x, file

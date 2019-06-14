@@ -85,9 +85,13 @@ def train(model, optimizer, criterion, scheduler, epochs, batch_size, step, lr, 
             optimizer.zero_grad()
             y_hat = model(x, m)
             # y_hat = y_hat.transpose(1, 2)
+            if type(model.mode) == int :
+                y_hat = y_hat.transpose(1, 2).unsqueeze(-1)
+            else:
+                y = y.float()
             y = y.unsqueeze(-1)
             # m_scaled, _ = model.upsample(m)
-            loss = criterion(y_hat, y, reduce=True)
+            loss = criterion(y_hat, y)
             loss.backward()
             grad_norm, skip_flag = check_update(model, CONFIG.grad_clip) 
             if not skip_flag:           
@@ -139,7 +143,10 @@ def evaluate(model, criterion, batch_size):
             if use_cuda:
                 x, m, y = x.cuda(), m.cuda(), y.cuda()
             y_hat = model(x, m)
-            # y_hat = y_hat.transpose(1, 2)
+            if type(model.mode) == int :
+                y_hat = y_hat.transpose(1, 2).unsqueeze(-1)
+            else:
+                y = y.float()
             y = y.unsqueeze(-1)
             loss = criterion(y_hat, y)
             # Compute avg loss
@@ -177,6 +184,7 @@ def main(args):
         rnn_dims=512,
         fc_dims=512,
         mode=CONFIG.mode,
+        mulaw=CONFIG.mulaw,
         pad=CONFIG.pad,
         upsample_factors=CONFIG.upsample_factors,
         feat_dims=80,
@@ -232,7 +240,12 @@ def main(args):
         model = apply_gradient_allreduce(model)
 
     # define train functions
-    criterion = discretized_mix_logistic_loss
+    if CONFIG.mode == 'mold':
+        criterion = discretized_mix_logistic_loss
+    elif CONFIG.mode == 'gauss':
+        criterion = gaussian_loss
+    elif type(CONFIG.mode) is int:
+        criterion = torch.nn.CrossEntropyLoss()
     model.train()
 
     # HIT IT!!!
