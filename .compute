@@ -1,4 +1,6 @@
 #!/bin/bash
 pip3 install https://download.pytorch.org/whl/cu100/torch-1.0.1.post2-cp36-cp36m-linux_x86_64.whl
 pip3 install -r requirements.txt
-python3 distribute.py --config_path config.json  --data_path ${USER_DIR}/wavernn_4241/  --output_path ../keep/  
+python3 preprocess_data.py --config_path config_libri360.json --num_procs 16 --out_path /home/erogol/Data/Libri-TTS/wavernn_360/ --data_path /data/rw/home/LibriTTS/all_wavs_360/
+ln -s /data/rw/home/LibriTTS/all_wavs_360/ wavernn_360/wavs/
+python3 distribute.py --config_path config_libri360.json  --data_path /data/rw/home/LibriTTS/wavernn_360/  --output_path ../keep/  

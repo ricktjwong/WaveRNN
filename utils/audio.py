@@ -3,6 +3,7 @@ import librosa
 import pickle
 import copy
 import numpy as np
+import soundfile as sf
 from pprint import pprint
 from scipy import signal, io
 
@@ -229,7 +230,8 @@ class AudioProcessor(object):
         return x
 
     def load_wav(self, filename, encode=False):
-        x, sr = librosa.load(filename, sr=self.sample_rate)
+        # x, sr = librosa.load(filename, sr=self.sample_rate)
+        x, sr = sf.read(filename)
         if self.do_trim_silence:
             x = self.trim_silence(x)
         # sr, x = io.wavfile.read(filename)
