@@ -20,10 +20,7 @@ def get_files(path, extension=".wav"):
 
 
 def process_file(path):
-    try:
-        wav = ap.load_wav(path, encode=False)
-    except:
-        raise RuntimeError(" [!] Connot read {}".format(path))
+    wav = ap.load_wav(path)
     mel = ap.melspectrogram(wav)
     if CONFIG.mode in ['mold', 'gauss']:
         # copy symbolic link of wav file
