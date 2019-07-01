@@ -61,22 +61,22 @@ def create_readme_rst():
 
 
 setup(
-    name='WAVERNN',
+    name='WaveRNN',
     version=version,
-    url='',
+    url='https://github.com/erogol/WaveRNN',
     description='WaveRNN Vocoder implementation on Pytorch',
     packages=find_packages(),
     cmdclass={
         'build_py': build_py,
         'develop': develop,
     },
-    setup_requires=["numpy==1.14.3"],
+    setup_requires=["numpy>=1.14.3"],
     install_requires=[
-        "scipy==0.19.0",
-        "torch >= 0.4.1",
-        "librosa==0.5.1",
-        "unidecode==0.4.20",
-        "matplotlib==2.0.2",
+        "scipy>=0.19.0",
+        "torch>=0.4.1",
+        "librosa>=0.5.1",
+        "unidecode>=0.4.20",
+        "matplotlib>=2.0.2",
     ],
     extras_require={
         "bin": [

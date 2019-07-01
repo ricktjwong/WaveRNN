@@ -135,6 +135,9 @@ def check_update(model, grad_clip):
     skip_flag = False
     grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
     if np.isinf(grad_norm):
-        print(" | > Gradient is INF !!")
+        print(" [!] Gradient is INF.")
+        skip_flag = True
+    if np.isnan(grad_norm):
+        print(" [!] Gradient is nan.")
         skip_flag = True
     return grad_norm, skip_flag

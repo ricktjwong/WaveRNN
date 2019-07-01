@@ -70,10 +70,10 @@ def train(model, optimizer, criterion, scheduler, epochs, batch_size, step, lr, 
         p["lr"] = lr
 
     best_loss = float('inf')
+    skipped_steps = 0
     for e in range(epochs):
         running_loss = 0.0
         start = time.time()
-        running_loss = 0.0
         iters = len(train_loader)
         # train loop
         print(" > Training", flush=True)
@@ -92,18 +92,24 @@ def train(model, optimizer, criterion, scheduler, epochs, batch_size, step, lr, 
             y = y.unsqueeze(-1)
             # m_scaled, _ = model.upsample(m)
             loss = criterion(y_hat, y)
+            if loss.item() is None:
+                raise RuntimeError(" [!] None loss. Exiting ...")
             loss.backward()
             grad_norm, skip_flag = check_update(model, CONFIG.grad_clip) 
             if not skip_flag:           
                 optimizer.step()
+                # Compute avg loss
+                if num_gpus > 1:
+                    loss = reduce_tensor(loss.data, num_gpus)
+                running_loss += loss.item()
+                avg_loss = running_loss / (i + 1 - skipped_steps)
+            else:
+                print(" [!] Skipping the step...")
+                skipped_steps += 1
             speed = (i + 1) / (time.time() - start)
             step += 1
             cur_lr = optimizer.param_groups[0]["lr"]
-            # Compute avg loss
-            if num_gpus > 1:
-                loss = reduce_tensor(loss.data, num_gpus)
-            running_loss += loss.item()
-            avg_loss = running_loss / (i + 1)
+            
             if step % CONFIG.print_step == 0:
                 print(
                     " | > Epoch: {}/{} -- Batch: {}/{} -- Loss: {:.3f}"
@@ -122,7 +128,8 @@ def train(model, optimizer, criterion, scheduler, epochs, batch_size, step, lr, 
         # )
         # validation loop
         avg_val_loss = evaluate(model, criterion, batch_size)
-        best_loss = save_best_model(model, optimizer, avg_val_loss, best_loss, MODEL_PATH, step, e)
+        if args.rank == 0:
+            best_loss = save_best_model(model, optimizer, avg_val_loss, best_loss, MODEL_PATH, step, e)
 
 
 
@@ -179,13 +186,13 @@ def main(args):
     train_ids = train_ids[:-10]
 
     # create the model
-    assert np.prod(CONFIG.upsample_factors) == ap.hop_length, ap.hop_length
     model = Model(
         rnn_dims=512,
         fc_dims=512,
         mode=CONFIG.mode,
         mulaw=CONFIG.mulaw,
         pad=CONFIG.pad,
+        use_upsample_net=CONFIG.use_upsample_net,
         upsample_factors=CONFIG.upsample_factors,
         feat_dims=80,
         compute_dims=128,

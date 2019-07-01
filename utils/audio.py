@@ -229,13 +229,14 @@ class AudioProcessor(object):
         x = np.sign(wav) / mu * ((1 + mu) ** np.abs(wav) - 1)
         return x
 
-    def load_wav(self, filename, encode=False):
-        # x, sr = librosa.load(filename, sr=self.sample_rate)
-        x, sr = sf.read(filename)
+    def load_wav(self, filename, sr=None):
+        if sr is None:
+            x, sr = sf.read(filename)
+        else:
+            x, sr = librosa.load(filename, sr=sr)
         if self.do_trim_silence:
             x = self.trim_silence(x)
-        # sr, x = io.wavfile.read(filename)
-        assert self.sample_rate == sr
+        assert self.sample_rate == sr, "%s vs %s"%(self.sample_rate, sr)
         return x
 
     def encode_16bits(self, x):

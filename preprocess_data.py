@@ -45,6 +45,8 @@ def extract_feats(wav_path):
     except:
         if args.ignore_errors:
             return None
+        else:
+            raise RuntimeError(" [!] Cannot process {}".format(wav_path))
     if quant is None and CONFIG.mode not in ['mold', 'gauss']:
         raise RuntimeError(" [!] Audio file cannot be quantized!")
     if quant:
