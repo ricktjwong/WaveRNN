@@ -69,12 +69,14 @@ class Stretch2d(nn.Module) :
 
 class UpsampleNetwork(nn.Module) :
     def __init__(self, feat_dims, upsample_scales, compute_dims, 
-                 res_blocks, res_out_dims, pad) :
+                 res_blocks, res_out_dims, pad, use_aux_net) :
         super().__init__()
-        total_scale = np.cumproduct(upsample_scales)[-1]
-        self.indent = pad * total_scale
-        self.resnet = MelResNet(res_blocks, feat_dims, compute_dims, res_out_dims, pad)
-        self.resnet_stretch = Stretch2d(total_scale, 1)
+        self.total_scale = np.cumproduct(upsample_scales)[-1]
+        self.indent = pad * self.total_scale
+        self.use_aux_net = use_aux_net
+        if use_aux_net:
+            self.resnet = MelResNet(res_blocks, feat_dims, compute_dims, res_out_dims, pad)
+            self.resnet_stretch = Stretch2d(self.total_scale, 1)
         self.up_layers = nn.ModuleList()
         for scale in upsample_scales :
             k_size = (1, scale * 2 + 1)
@@ -86,23 +88,52 @@ class UpsampleNetwork(nn.Module) :
             self.up_layers.append(conv)
     
     def forward(self, m) :
-        aux = self.resnet(m).unsqueeze(1)
-        aux = self.resnet_stretch(aux)
-        aux = aux.squeeze(1)
+        if self.use_aux_net:
+            aux = self.resnet(m).unsqueeze(1)
+            aux = self.resnet_stretch(aux)
+            aux = aux.squeeze(1)
+            aux = aux.transpose(1, 2)
+        else:
+            aux = None
         m = m.unsqueeze(1)
         for f in self.up_layers : m = f(m)
         m = m.squeeze(1)[:, :, self.indent:-self.indent]
-        return m.transpose(1, 2), aux.transpose(1, 2)
+        return m.transpose(1, 2), aux
+
+
+class Upsample(nn.Module):
+    def __init__(self, scale, pad, res_blocks, feat_dims, compute_dims, res_out_dims, use_aux_net):
+        super().__init__()
+        self.scale = scale
+        self.pad = pad
+        self.indent = pad * scale
+        self.use_aux_net = use_aux_net
+        self.resnet = MelResNet(res_blocks, feat_dims, compute_dims, res_out_dims, pad)
+    
+    def forward(self, m):
+        if self.use_aux_net:
+            aux = self.resnet(m)
+            aux = torch.nn.functional.interpolate(aux, scale_factor= self.scale, mode='linear', align_corners=True)
+            aux = aux.transpose(1, 2)
+        else:
+            aux = None
+        m = torch.nn.functional.interpolate(m, scale_factor= self.scale, mode='linear', align_corners=True)
+        m = m[:, :, self.indent:-self.indent]
+        m = m * 0.045   # empirically found
+
+        return m.transpose(1, 2), aux
 
 
 class Model(nn.Module) :
-    def __init__(self, rnn_dims, fc_dims, mode, mulaw, pad, upsample_factors,
+    def __init__(self, rnn_dims, fc_dims, mode, mulaw, pad, use_aux_net, use_upsample_net, upsample_factors,
                  feat_dims, compute_dims, res_out_dims, res_blocks,
                  hop_length, sample_rate):
         super().__init__()
         self.mode = mode
         self.mulaw = mulaw
         self.pad = pad
+        self.use_upsample_net = use_upsample_net
+        self.use_aux_net = use_aux_net
         if type(self.mode) is int:
             self.n_classes = 2 ** self.mode
         elif self.mode == 'mold':
@@ -116,14 +147,27 @@ class Model(nn.Module) :
         self.aux_dims = res_out_dims // 4
         self.hop_length = hop_length
         self.sample_rate = sample_rate
-        self.upsample = UpsampleNetwork(feat_dims, upsample_factors, compute_dims, 
-                                        res_blocks, res_out_dims, pad)
-        self.I = nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims)
-        self.rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
-        self.rnn2 = nn.GRU(rnn_dims + self.aux_dims, rnn_dims, batch_first=True)
-        self.fc1 = nn.Linear(rnn_dims + self.aux_dims, fc_dims)
-        self.fc2 = nn.Linear(fc_dims + self.aux_dims, fc_dims)
-        self.fc3 = nn.Linear(fc_dims, self.n_classes)
+
+        if self.use_upsample_net:
+            assert np.cumproduct(upsample_factors)[-1] == self.hop_length, " [!] upsample scales needs to be equal to hop_length"
+            self.upsample = UpsampleNetwork(feat_dims, upsample_factors, compute_dims, 
+                                            res_blocks, res_out_dims, pad, use_aux_net)
+        else:
+            self.upsample = Upsample(hop_length, pad, res_blocks, feat_dims, compute_dims, res_out_dims, use_aux_net)
+        if self.use_aux_net:
+            self.I = nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims)
+            self.rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
+            self.rnn2 = nn.GRU(rnn_dims + self.aux_dims, rnn_dims, batch_first=True)
+            self.fc1 = nn.Linear(rnn_dims + self.aux_dims, fc_dims)
+            self.fc2 = nn.Linear(fc_dims + self.aux_dims, fc_dims)
+            self.fc3 = nn.Linear(fc_dims, self.n_classes)
+        else:
+            self.I = nn.Linear(feat_dims + 1, rnn_dims)
+            self.rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
+            self.rnn2 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
+            self.fc1 = nn.Linear(rnn_dims, fc_dims)
+            self.fc2 = nn.Linear(fc_dims, fc_dims)
+            self.fc3 = nn.Linear(fc_dims, self.n_classes)
     
     
     def forward(self, x, mels) :
@@ -132,13 +176,14 @@ class Model(nn.Module) :
         h2 = torch.zeros(1, bsize, self.rnn_dims).cuda()
         mels, aux = self.upsample(mels)
         
-        aux_idx = [self.aux_dims * i for i in range(5)]
-        a1 = aux[:, :, aux_idx[0]:aux_idx[1]]
-        a2 = aux[:, :, aux_idx[1]:aux_idx[2]]
-        a3 = aux[:, :, aux_idx[2]:aux_idx[3]]
-        a4 = aux[:, :, aux_idx[3]:aux_idx[4]]
+        if self.use_aux_net:
+            aux_idx = [self.aux_dims * i for i in range(5)]
+            a1 = aux[:, :, aux_idx[0]:aux_idx[1]]
+            a2 = aux[:, :, aux_idx[1]:aux_idx[2]]
+            a3 = aux[:, :, aux_idx[2]:aux_idx[3]]
+            a4 = aux[:, :, aux_idx[3]:aux_idx[4]]
         
-        x = torch.cat([x.unsqueeze(-1), mels, a1], dim=2)
+        x = torch.cat([x.unsqueeze(-1), mels, a1], dim=2) if self.use_aux_net else torch.cat([x.unsqueeze(-1), mels], dim=2)
         x = self.I(x)
         res = x
         self.rnn1.flatten_parameters()
@@ -146,15 +191,15 @@ class Model(nn.Module) :
         
         x = x + res
         res = x
-        x = torch.cat([x, a2], dim=2)
+        x = torch.cat([x, a2], dim=2) if self.use_aux_net else x
         self.rnn2.flatten_parameters()
         x, _ = self.rnn2(x, h2)
         
         x = x + res
-        x = torch.cat([x, a3], dim=2)
+        x = torch.cat([x, a3], dim=2) if self.use_aux_net else x
         x = F.relu(self.fc1(x))
         
-        x = torch.cat([x, a4], dim=2)
+        x = torch.cat([x, a4], dim=2) if self.use_aux_net else x
         x = F.relu(self.fc2(x))
         return self.fc3(x)
     
@@ -176,7 +221,8 @@ class Model(nn.Module) :
             
             if batched :
                 mels = self.fold_with_overlap(mels, target, overlap)
-                aux = self.fold_with_overlap(aux, target, overlap)
+                if aux is not None:
+                    aux = self.fold_with_overlap(aux, target, overlap)
 
             b_size, seq_len, _ = mels.size()
             
@@ -184,29 +230,31 @@ class Model(nn.Module) :
             h2 = torch.zeros(b_size, self.rnn_dims).cuda()
             x = torch.zeros(b_size, 1).cuda()
             
-            d = self.aux_dims
-            aux_split = [aux[:, :, d*i:d*(i+1)] for i in range(4)]
+            if self.use_aux_net:
+                d = self.aux_dims
+                aux_split = [aux[:, :, d*i:d*(i+1)] for i in range(4)]
             
             for i in range(seq_len) :
 
                 m_t = mels[:, i, :]
                 
-                a1_t, a2_t, a3_t, a4_t = \
-                    (a[:, i, :] for a in aux_split)
+                if self.use_aux_net:
+                    a1_t, a2_t, a3_t, a4_t = \
+                        (a[:, i, :] for a in aux_split)
                 
-                x = torch.cat([x, m_t, a1_t], dim=1)
+                x = torch.cat([x, m_t, a1_t], dim=1) if self.use_aux_net else torch.cat([x, m_t], dim=1)
                 x = self.I(x)
                 h1 = rnn1(x, h1)
                 
                 x = x + h1
-                inp = torch.cat([x, a2_t], dim=1)
+                inp = torch.cat([x, a2_t], dim=1) if self.use_aux_net else x
                 h2 = rnn2(inp, h2)
                 
                 x = x + h2
-                x = torch.cat([x, a3_t], dim=1)
+                x = torch.cat([x, a3_t], dim=1) if self.use_aux_net else x
                 x = F.relu(self.fc1(x))
                 
-                x = torch.cat([x, a4_t], dim=1)
+                x = torch.cat([x, a4_t], dim=1) if self.use_aux_net else x
                 x = F.relu(self.fc2(x))
                 
                 logits = self.fc3(x)
@@ -244,9 +292,9 @@ class Model(nn.Module) :
             output = ap.mulaw_decode(output, self.mode)
 
         # Fade-out at the end to avoid signal cutting out suddenly
-        # fade_out = np.linspace(1, 0, 20 * self.hop_length)
-        # output = output[:wave_len]
-        # output[-20 * self.hop_length:] *= fade_out
+        fade_out = np.linspace(1, 0, 20 * self.hop_length)
+        output = output[:wave_len]
+        output[-20 * self.hop_length:] *= fade_out
             
         self.train()
         return output
