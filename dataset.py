@@ -1,5 +1,7 @@
 import torch
 import numpy as np
+from tqdm import tqdm
+from multiprocessing import Pool
 from torch.utils.data import Dataset
 
 
@@ -14,9 +16,14 @@ class MyDataset(Dataset):
         self.mode = mode
         self.ap = ap
 
+        #wav_files = [f"{self.path}wavs/{file}.wav" for file in self.metadata]
+        #with Pool(4) as pool:
+        #    self.wav_cache = pool.map(self.ap.load_wav, wav_files)
+
     def __getitem__(self, index):
         file = self.metadata[index]
         m = np.load(f"{self.path}mel/{file}.npy")
+        #x = self.wav_cache[index]
         if self.mode in ['gauss', 'mold']:
             x = self.ap.load_wav(f"{self.path}wavs/{file}.wav")
         elif type(self.mode) is int:
@@ -29,14 +36,16 @@ class MyDataset(Dataset):
         return len(self.metadata)
 
     def collate(self, batch):
-        seq_len = self.mel_len * self.hop_length
-        pad = self.pad  # kernel size 5
-        mel_win = seq_len // self.hop_length + 2 * pad
+        min_mel_len = np.min([x[0].shape[-1] for x in batch])
+        active_mel_len = np.minimum(min_mel_len - 2 * self.pad, self.mel_len)
+        seq_len = active_mel_len * self.hop_length
+        pad = self.pad  # padding against resnet
+        mel_win = active_mel_len + 2 * pad
         max_offsets = [x[0].shape[-1] - (mel_win + 2 * pad) for x in batch]
         if self.eval:
             mel_offsets = [10] * len(batch)
         else:
-            mel_offsets = [np.random.randint(0, offset) for offset in max_offsets]
+            mel_offsets = [np.random.randint(0, np.maximum(1, offset)) for offset in max_offsets]
         sig_offsets = [(offset + pad) * self.hop_length for offset in mel_offsets]
 
         mels = [
