@@ -143,14 +143,25 @@ def main(args):
     num_gpus = torch.cuda.device_count()
     group_id = time.strftime("%Y_%m_%d-%H%M%S")
 
-    # set arguments for train.py
-    command = ['train.py']
-    command.append('--restore_path={}'.format(args.restore_path))
-    command.append('--config_path={}'.format(args.config_path))
-    command.append('--group_id=group_{}'.format(group_id))
-    command.append('--data_path={}'.format(args.data_path))
-    command.append('--output_path={}'.format(OUT_PATH))
-    command.append('')
+    if args.lr_find:
+        command = ['find_lr.py']
+        command.append('--restore_path={}'.format(args.restore_path))
+        command.append('--config_path={}'.format(args.config_path))
+        command.append('--group_id=group_{}'.format(group_id))
+        command.append('--data_path={}'.format(args.data_path))
+        command.append('--output_path={}'.format(OUT_PATH))
+        command.append('--init_lr={}'.format(args.init_lr))
+        command.append('--end_lr={}'.format(args.end_lr))
+        command.append('')
+    else:
+        # set arguments for train.py
+        command = ['train.py']
+        command.append('--restore_path={}'.format(args.restore_path))
+        command.append('--config_path={}'.format(args.config_path))
+        command.append('--group_id=group_{}'.format(group_id))
+        command.append('--data_path={}'.format(args.data_path))
+        command.append('--output_path={}'.format(OUT_PATH))
+        command.append('')
 
     if not os.path.isdir(stdout_path):
         os.makedirs(stdout_path)
@@ -189,6 +200,16 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--data_path', type=str, help='dataset path.', default='')
+    parser.add_argument(
+        '--lr_find', type=bool, help="run lr_find.py", default=False
+    )
+
+    parser.add_argument(
+        "--init_lr", type=float, help="initial lr for lr_find.py", default=1e-7
+    )
+    parser.add_argument(
+        "--end_lr", type=float, help="end lr for lr_find.py", default=1
+    )
 
     args = parser.parse_args()
     main(args)
