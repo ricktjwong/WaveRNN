@@ -192,6 +192,7 @@ def main(args):
         mode=CONFIG.mode,
         mulaw=CONFIG.mulaw,
         pad=CONFIG.pad,
+        use_aux_net=CONFIG.use_aux_net,
         use_upsample_net=CONFIG.use_upsample_net,
         upsample_factors=CONFIG.upsample_factors,
         feat_dims=80,
