@@ -24,6 +24,11 @@ class MyDataset(Dataset):
         file = self.metadata[index]
         m = np.load(f"{self.path}mel/{file}.npy")
         #x = self.wav_cache[index]
+        if 5 > m.shape[-1]:
+            print(' [!] Instance is too short! : {}'.format(file))
+            self.metadata[index] = self.metadata[index + 1]
+            file = self.metadata[index]
+            m = np.load(f"{self.path}mel/{file}.npy")
         if self.mode in ['gauss', 'mold']:
             x = self.ap.load_wav(f"{self.path}wavs/{file}.wav")
         elif type(self.mode) is int:
